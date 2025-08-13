@@ -6,6 +6,42 @@ import { PKPass } from 'passkit-generator'
 import { createEvent } from 'ics'
 
 // ==============================================================================
+// ENVIRONMENT VARIABLE TYPE DECLARATIONS
+// ==============================================================================
+
+declare global {
+  namespace NodeJS {
+    interface ProcessEnv {
+      SERVICES_API_KEY: string;
+      PASS_TYPE_IDENTIFIER: string;
+      APPLE_TEAM_ID: string;
+      PASSKIT_CERT: string;
+      PASSKIT_KEY: string;
+      PASSKIT_KEY_PASSPHRASE: string;
+      WWDR_CERT: string;
+      OPENAI_API_KEY: string;
+    }
+  }
+}
+
+// ==============================================================================
+// ENVIRONMENT VALIDATION
+// ==============================================================================
+
+function getRequiredEnvVar(key: string): string {
+  const value = process.env[key as keyof typeof process.env];
+  if (!value || typeof value !== 'string') {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  return value;
+}
+
+function getOptionalEnvVar(key: string, defaultValue: string = ''): string {
+  const value = process.env[key as keyof typeof process.env];
+  return (value && typeof value === 'string') ? value : defaultValue;
+}
+
+// ==============================================================================
 // TYPESCRIPT INTERFACES
 // ==============================================================================
 
@@ -103,9 +139,10 @@ interface PassField {
   value: string;
 }
 
+// Fixed PassBarcode interface - format is now required
 interface PassBarcode {
   message: string;
-  format: string;
+  format: string; // Required field
   messageEncoding: string;
 }
 
@@ -137,28 +174,11 @@ function sanitizeText(text: string): string {
 }
 
 /**
- * Generate safe filename from product name
- */
-function generateSafeFilename(productName: string, suffix: string): string {
-  const safeName = productName
-    .replace(/[^a-zA-Z0-9\-_\s]/g, '')
-    .replace(/\s+/g, '-')
-    .substring(0, 50)
-    .replace(/^-+|-+$/g, '')
-  
-  return `Claimso-${suffix}-${safeName || 'Product'}`
-}
-
-/**
  * Authorization middleware
  */
 function checkAuth(c: any) {
   const authHeader = c.req.header('Authorization')
-  const expectedKey = process.env.SERVICES_API_KEY
-  
-  if (!expectedKey) {
-    throw new Error('SERVICES_API_KEY not configured')
-  }
+  const expectedKey = getRequiredEnvVar('SERVICES_API_KEY')
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return c.json({ error: 'Missing Authorization header' }, 401)
@@ -444,15 +464,15 @@ async function generateWarrantyClaimPacket(request: GeneratePacketRequest): Prom
   addSectionSpacing(5)
   
   const productDetails = [
-    ['Product Name:', sanitizeText(request.product.name)],
+    ['Product Name:', sanitizeText(request.product.name || 'N/A')],
     ['Brand:', sanitizeText(request.product.brand || 'N/A')],
     ['Category:', sanitizeText(request.product.category || 'N/A')],
     ['Serial Number:', sanitizeText(request.product.serial_number || 'N/A')],
   ]
   
   productDetails.forEach(([label, value]) => {
-    page.drawText(label, { x: 70, y: yPosition, size: 11, font: boldFont })
-    page.drawText(value, { x: 200, y: yPosition, size: 11, font: regularFont })
+    page.drawText(label!, { x: 70, y: yPosition, size: 11, font: boldFont })
+    page.drawText(value!, { x: 200, y: yPosition, size: 11, font: regularFont })
     yPosition -= 16
   })
   addSectionSpacing()
@@ -469,8 +489,8 @@ async function generateWarrantyClaimPacket(request: GeneratePacketRequest): Prom
   ]
   
   purchaseInfo.forEach(([label, value]) => {
-    page.drawText(label, { x: 70, y: yPosition, size: 11, font: boldFont })
-    page.drawText(value, { x: 200, y: yPosition, size: 11, font: regularFont })
+    page.drawText(label!, { x: 70, y: yPosition, size: 11, font: boldFont })
+    page.drawText(value!, { x: 200, y: yPosition, size: 11, font: regularFont })
     yPosition -= 16
   })
   addSectionSpacing()
@@ -563,8 +583,8 @@ async function generateDefaultIcon(): Promise<Buffer> {
 async function loadPassAssets(): Promise<{ passJson: PassTemplate; iconBuffer: Buffer }> {
   const passJson: PassTemplate = {
     formatVersion: 1,
-    passTypeIdentifier: process.env.PASS_TYPE_IDENTIFIER || 'pass.com.claimso.smartpass',
-    teamIdentifier: process.env.APPLE_TEAM_ID || 'YOUR_TEAM_ID',
+    passTypeIdentifier: getOptionalEnvVar('PASS_TYPE_IDENTIFIER', 'pass.com.claimso.smartpass'),
+    teamIdentifier: getOptionalEnvVar('APPLE_TEAM_ID', 'YOUR_TEAM_ID'),
     organizationName: 'CLAIMSO',
     description: 'CLAIMSO Smart Pass - Personal Warranty Assistant',
     logoText: 'CLAIMSO',
@@ -619,7 +639,7 @@ async function loadPassAssets(): Promise<{ passJson: PassTemplate; iconBuffer: B
     barcodes: [
       {
         message: '',
-        format: 'PKBarcodeFormatQR',
+        format: 'PKBarcodeFormatQR', // Required field with explicit value
         messageEncoding: 'iso-8859-1'
       }
     ],
@@ -664,17 +684,28 @@ async function generateApplePass(userProfile: UserProfile): Promise<Uint8Array> 
     },
     barcodes: [
       {
-        ...assets.passJson.barcodes[0],
-        message: userProfile.id
+        message: userProfile.id,
+        format: 'PKBarcodeFormatQR', // Explicitly set required format
+        messageEncoding: 'iso-8859-1'
       }
     ]
   }
 
+  // Use direct environment variable access with explicit checks and non-null assertions
+  const passkitCert = process.env['PASSKIT_CERT'];
+  const passkitKey = process.env['PASSKIT_KEY'];
+  const passkitKeyPassphrase = process.env['PASSKIT_KEY_PASSPHRASE'] || '';
+  const wwdrCert = process.env['WWDR_CERT'] || '';
+
+  if (!passkitCert || !passkitKey) {
+    throw new Error('Missing required certificate environment variables: PASSKIT_CERT, PASSKIT_KEY');
+  }
+
   const certificates = {
-    signerCert: Buffer.from(process.env.PASSKIT_CERT!, 'base64'),
-    signerKey: Buffer.from(process.env.PASSKIT_KEY!, 'base64'),
-    signerKeyPassphrase: process.env.PASSKIT_KEY_PASSPHRASE || '',
-    wwdr: process.env.WWDR_CERT ? Buffer.from(process.env.WWDR_CERT, 'base64') : '',
+    signerCert: Buffer.from(passkitCert!, 'base64'),
+    signerKey: Buffer.from(passkitKey!, 'base64'),
+    signerKeyPassphrase: passkitKeyPassphrase,
+    wwdr: wwdrCert ? Buffer.from(wwdrCert!, 'base64') : Buffer.alloc(0),
   }
 
   const pass = new PKPass(
@@ -710,11 +741,7 @@ app.post('/email-parser', async (c) => {
       return c.json({ error: 'Missing required email fields' }, 400)
     }
 
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-    if (!OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY not configured')
-    }
-
+    const OPENAI_API_KEY = getRequiredEnvVar('OPENAI_API_KEY')
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY })
 
     // Stage 1: Classify Email Intent
@@ -877,6 +904,25 @@ app.get('/health', (c) => {
     service: 'claimso-services',
     timestamp: new Date().toISOString(),
     features: ['email-parser', 'pdf-generator', 'pass-generator', 'calendar-generator']
+  })
+})
+
+// ==============================================================================
+// ROOT ENDPOINT
+// ==============================================================================
+
+app.get('/', (c) => {
+  return c.json({
+    status: 'ok',
+    service: 'claimso-services',
+    version: '1.0.0',
+    endpoints: {
+      'POST /email-parser': 'Parse and classify email content',
+      'POST /pdf-generator': 'Generate warranty claim packets',
+      'POST /pass-generator': 'Generate Apple Wallet passes', 
+      'POST /calendar-generator': 'Generate calendar events',
+      'GET /health': 'Health check endpoint'
+    }
   })
 })
 
