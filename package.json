@@ -1,0 +1,30 @@
+{
+  "name": "claimso-services",
+  "version": "1.0.0",
+  "description": "A lightweight, production-ready microservice for Claimso built with Hono and TypeScript",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": ["microservice", "hono", "typescript", "vercel", "serverless"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "hono": "^3.12.8",
+    "openai": "^4.24.1",
+    "pdf-lib": "^1.17.1",
+    "passkit-generator": "^3.1.1",
+    "ics": "^3.7.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/node": "^20.10.6",
+    "tsx": "^4.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
